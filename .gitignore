@@ -1,0 +1,8 @@
+*
+
+!.gitignore
+!plotter.py
+!CONFIG.md
+!README.md
+!LICENSE
+!example_config.yaml

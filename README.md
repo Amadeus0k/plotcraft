@@ -1,4 +1,4 @@
-# plotter
+# plotcraft
 
 A single-script, config-driven plotting tool for journal-quality figures.
 

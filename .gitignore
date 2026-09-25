@@ -6,3 +6,10 @@
 !README.md
 !LICENSE
 !example_config.yaml
+!requirements.txt
+!ui_main.py
+!ui/
+!ui/**
+**/__pycache__/
+*.pyc
+

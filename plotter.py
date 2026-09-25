@@ -16,6 +16,19 @@ import os
 import sys
 
 import matplotlib
+# Force the non-interactive Agg backend before pyplot ever picks one on its
+# own. Nothing here needs an interactive backend — no plt.show(), this is a
+# save-to-file batch renderer — but pyplot auto-selects one lazily on first
+# use, and if a GUI toolkit happens to be importable in the environment
+# (e.g. the GUI in ui/ pulls in PyQt6), it silently picks that toolkit's
+# interactive backend instead. That backend makes plt.subplots() construct
+# a full GUI FigureManager (its own canvas, toolbar and unshown window) for
+# every figure, on top of whatever canvas the caller actually wants —
+# wasted work for the CLI, and outright broken for ui/preview.py, which
+# rebinds each figure to its own embedded canvas via fig.set_canvas() right
+# after: the auto-created toolbar's buttons stay connected to the
+# discarded canvas, so they look present but silently do nothing.
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -64,6 +77,18 @@ matplotlib.rcParams.update({
 
 DATA_DIR   = "data"
 OUTPUT_DIR = "output"
+
+
+def set_data_dir(path):
+    """Point data-file resolution (load_series) at a new directory."""
+    global DATA_DIR
+    DATA_DIR = path
+
+
+def set_output_dir(path):
+    """Point SVG output (build_plot/build_figure) at a new directory."""
+    global OUTPUT_DIR
+    OUTPUT_DIR = path
 
 # Okabe-Ito colorblind-safe palette, extended with additional publication-quality hues.
 _PALETTE = [
@@ -234,6 +259,9 @@ def smooth_series(x, y, smooth_cfg):
     return x_new, interp1d(x, y_sm, kind="cubic")(x_new)
 
 
+_DATAFRAME_CACHE = {}   # (abspath, mtime, fmt) -> DataFrame
+
+
 def _load_dataframe(full_path, fmt=None):
     """Load a data file into a DataFrame.
 
@@ -242,7 +270,17 @@ def _load_dataframe(full_path, fmt=None):
     None  — auto-detect: 'dat' if the first non-empty line starts with '#', else 'csv'
     'csv' — comma-separated with a header row
     'dat' — whitespace-delimited; column names taken from the first '#'-prefixed line
+
+    Cached by (absolute path, mtime, fmt) — repeated series reading the same
+    file (common in multi-panel figures) hit the cache instead of re-reading.
     """
+    abspath = os.path.abspath(full_path)
+    mtime = os.path.getmtime(full_path)
+    key = (abspath, mtime, fmt)
+    cached = _DATAFRAME_CACHE.get(key)
+    if cached is not None:
+        return cached
+
     if fmt is None:
         with open(full_path, "r") as fh:
             first = fh.readline()
@@ -258,10 +296,13 @@ def _load_dataframe(full_path, fmt=None):
                     break
         if cols is None:
             raise ValueError(f"No '#' header line found in dat file: {full_path}")
-        return pd.read_csv(full_path, sep=r"\s+", comment="#",
-                           header=None, names=cols, engine="python")
+        df = pd.read_csv(full_path, sep=r"\s+", comment="#",
+                         header=None, names=cols, engine="python")
+    else:
+        df = pd.read_csv(full_path)
 
-    return pd.read_csv(full_path)
+    _DATAFRAME_CACHE[key] = df
+    return df
 
 
 def load_series(series_cfg):
@@ -749,7 +790,8 @@ def _place_figure_legend(fig, legend_cfg, handles, labels):
 # Plot builder
 # ---------------------------------------------------------------------------
 
-def build_plot(plot_cfg, output_dir):
+def render_plot(plot_cfg):
+    """Build and return the Figure for one `plots:` entry, without saving it."""
     with matplotlib.rc_context(_fontsize_rcparams(plot_cfg.get("fontsize"))):
         width  = float(plot_cfg.get("width",  3.5))
         height = float(plot_cfg.get("height", 2.8))
@@ -814,19 +856,31 @@ def build_plot(plot_cfg, output_dir):
         if zoom_cfg:
             _add_zoom_inset(ax, zoom_cfg, series_data, show_grid)
 
-        name     = plot_cfg.get("name", "figure")
-        out_path = os.path.join(output_dir, f"{name}.svg")
+        return fig
+
+
+def build_plot(plot_cfg, output_dir):
+    fig = render_plot(plot_cfg)
+    name     = plot_cfg.get("name", "figure")
+    out_path = os.path.join(output_dir, f"{name}.svg")
+    # SVG's final text layout (incl. tick-count decisions) is computed at save
+    # time, not baked in when the artists were created — so any draw/save must
+    # happen under the same fontsize overrides used to build the figure, or
+    # tick spacing silently shifts. Anyone else who draws/saves this figure
+    # later (e.g. a GUI canvas) must do the same: re-wrap with
+    # matplotlib.rc_context(_fontsize_rcparams(plot_cfg.get("fontsize"))).
+    with matplotlib.rc_context(_fontsize_rcparams(plot_cfg.get("fontsize"))):
         fig.savefig(out_path, format="svg")
-        plt.close(fig)
-        print(f"  saved  {out_path}")
+    plt.close(fig)
+    print(f"  saved  {out_path}")
 
 
 # ---------------------------------------------------------------------------
 # Multi-panel figure builder
 # ---------------------------------------------------------------------------
 
-def build_figure(fig_cfg, output_dir):
-    """Build a grid of panels into a single SVG with an optional shared legend.
+def render_figure(fig_cfg):
+    """Build and return the Figure for one `figures:` entry, without saving it.
 
     fig_cfg keys
     ------------
@@ -977,11 +1031,19 @@ def build_figure(fig_cfg, output_dir):
         for ax, zoom_cfg, series_data, show_grid in zoom_tasks:
             _add_zoom_inset(ax, zoom_cfg, series_data, show_grid)
 
-        name     = fig_cfg.get("name", "figure")
-        out_path = os.path.join(output_dir, f"{name}.svg")
+        return fig
+
+
+def build_figure(fig_cfg, output_dir):
+    fig = render_figure(fig_cfg)
+    name     = fig_cfg.get("name", "figure")
+    out_path = os.path.join(output_dir, f"{name}.svg")
+    # See build_plot's comment — save must happen under the same fontsize
+    # overrides render_figure used, or tick spacing silently shifts.
+    with matplotlib.rc_context(_fontsize_rcparams(fig_cfg.get("fontsize"))):
         fig.savefig(out_path, format="svg")
-        plt.close(fig)
-        print(f"  saved  {out_path}")
+    plt.close(fig)
+    print(f"  saved  {out_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -989,8 +1051,11 @@ def build_figure(fig_cfg, output_dir):
 # ---------------------------------------------------------------------------
 
 def _apply_latex_settings(cfg):
-    """Enable full LaTeX rendering if requested, otherwise mathtext handles $…$ natively."""
+    """Enable or disable full LaTeX rendering per `cfg["latex"]`; mathtext
+    handles $…$ natively when disabled. Idempotent — safe to call repeatedly
+    in a long-lived process (e.g. the GUI), unlike a one-way toggle."""
     if not cfg.get("latex", False):
+        matplotlib.rcParams["text.usetex"] = False
         return
     try:
         matplotlib.rcParams.update({

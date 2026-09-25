@@ -1,0 +1,8 @@
+# Runtime dependencies
+matplotlib>=3.10
+numpy
+pandas
+scipy
+pyyaml
+PyQt6>=6.7
+ruamel.yaml>=0.18

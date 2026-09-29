@@ -55,8 +55,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from PyQt6.QtCore import QEvent, QTimer, Qt
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
-    QToolBar, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QSizePolicy, QToolBar, QVBoxLayout, QWidget,
 )
 
 import plotter
@@ -194,6 +194,16 @@ class PreviewCanvas(QWidget):
         self._debounce.setInterval(200)
         self._debounce.timeout.connect(self._flush_pending)
 
+        # The placeholder (no plot/figure selected yet) has no real content
+        # to preserve, so it's the one figure allowed to match the app's
+        # palette instead of being forced to white — see _show_placeholder.
+        # Actual rendered plots/figures must stay white regardless of system
+        # theme: they're the WYSIWYG preview of a journal-quality export.
+        self._placeholder_message = None
+        style_hints = QApplication.instance().styleHints()
+        if hasattr(style_hints, "colorSchemeChanged"):
+            style_hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
+
     # -- public API -----------------------------------------------------
 
     def set_document(self, doc):
@@ -254,14 +264,16 @@ class PreviewCanvas(QWidget):
             plotter.set_data_dir(old_data_dir)
 
         self._error_label.setVisible(False)
+        self._placeholder_message = None
         self._show_figure(fig, cfg.get("fontsize"))
 
-    def _show_figure(self, fig, fontsize_cfg):
+    def _show_figure(self, fig, fontsize_cfg, force_white=True):
         if self._current_fig is not None and self._current_fig is not fig:
             plt.close(self._current_fig)
         self._current_fig = fig
         self._current_fontsize_cfg = fontsize_cfg
-        fig.set_facecolor("white")
+        if force_white:
+            fig.set_facecolor("white")
         fig.set_canvas(self._mpl_figure_canvas)
         self._mpl_figure_canvas.figure = fig
         # FigureCanvasBase.callbacks is a *property* — `property(lambda
@@ -312,13 +324,24 @@ class PreviewCanvas(QWidget):
         # Keep the last good figure on screen — do not touch _current_fig/canvas.
 
     def _show_placeholder(self, message):
+        self._placeholder_message = message
         if self._current_fig is not None:
             plt.close(self._current_fig)
         self._current_fig = None
         self._error_label.setVisible(False)
+        palette = QApplication.instance().palette()
+        bg = palette.color(palette.ColorRole.Window).name()
+        fg = palette.color(palette.ColorRole.WindowText).name()
         blank = plt.figure(figsize=(3, 2))
-        blank.text(0.5, 0.5, message, ha="center", va="center", color="gray", wrap=True)
-        self._show_figure(blank, None)
+        blank.patch.set_facecolor(bg)
+        blank.text(0.5, 0.5, message, ha="center", va="center", color=fg, wrap=True)
+        self._show_figure(blank, None, force_white=False)
+
+    def _on_color_scheme_changed(self, *_args):
+        # Redraw the placeholder in the new palette; real rendered
+        # plots/figures are unaffected (see _show_figure's force_white).
+        if self._placeholder_message is not None:
+            self._show_placeholder(self._placeholder_message)
 
     # -- zoom / true size ---------------------------------------------------
 

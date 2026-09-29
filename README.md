@@ -25,13 +25,19 @@ scientific-notation tick formatting, and split color/line-style legends.
 ## Requirements
 
 - Python 3
-- `matplotlib`, `numpy`, `pandas`, `scipy`, `pyyaml`
+- Command line: `matplotlib`, `numpy`, `pandas`, `scipy`, `pyyaml`
+- GUI (optional): additionally `PyQt6`, `ruamel.yaml`
+- `latex: true` in a config (optional): a working LaTeX installation
+  (`latex` + `dvipng`) on `PATH`. Without one, rendering falls back to
+  mathtext with a warning — see [`CONFIG.md`](CONFIG.md).
 
 ```
-pip install matplotlib numpy pandas scipy pyyaml
+pip install -r requirements.txt
 ```
 
 ## Usage
+
+### Command line
 
 ```
 python plotter.py <config.yaml> [config2.yaml ...]
@@ -43,6 +49,24 @@ python plotter.py <config.yaml> [config2.yaml ...]
 See [`example_config.yaml`](example_config.yaml) for an annotated example
 covering single-axis plots, dual-axis plots, zoom insets, smoothing, and
 legend placement, and [`CONFIG.md`](CONFIG.md) for the full YAML reference.
+
+### GUI
+
+A PyQt6 editor is available as an alternative to hand-writing YAML: a tree
+view of the config on the left, a live matplotlib preview in the middle, and
+a field-by-field inspector on the right that updates the preview as you type.
+
+```
+python ui_main.py [config.yaml]
+```
+
+- Passing a config path opens it directly; otherwise the GUI starts with a
+  blank document (`File → New`/`Open...`).
+- `File → Save`/`Save As...` writes the YAML back out; `File → Export
+  selected/all to SVG` renders through the same code path as the command
+  line, so output is identical either way.
+- `File → Set data directory...` overrides where data files are resolved
+  from, for previewing a config against data that lives outside `data/`.
 
 ## License
 

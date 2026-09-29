@@ -12,4 +12,6 @@
 !ui/**
 **/__pycache__/
 *.pyc
+!data/
+!data/**
 
